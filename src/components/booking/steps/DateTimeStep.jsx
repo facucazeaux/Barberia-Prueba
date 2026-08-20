@@ -4,15 +4,15 @@ import { getUpcomingDays, getAvailableSlots } from '../../../utils/scheduling.js
 import { getAppointments } from '../../../services/appointmentsService.js';
 import Button from '../../shared/Button.jsx';
 
-// Schedule por defecto (Lunes a Sábado habilitados) si la BD no lo envía
+// Rango de atención por defecto (Lunes a Sábado de 09:00 a 20:00, Domingo cerrado)
 const DEFAULT_SCHEDULE = {
-  1: true, // Lunes
-  2: true, // Martes
-  3: true, // Miércoles
-  4: true, // Jueves
-  5: true, // Viernes
-  6: true, // Sábado
-  0: false // Domingo (Cerrado)
+  1: { start: '09:00', end: '20:00' }, // Lunes
+  2: { start: '09:00', end: '20:00' }, // Martes
+  3: { start: '09:00', end: '20:00' }, // Miércoles
+  4: { start: '09:00', end: '20:00' }, // Jueves
+  5: { start: '09:00', end: '20:00' }, // Viernes
+  6: { start: '09:00', end: '20:00' }, // Sábado
+  0: null                              // Domingo
 };
 
 /**
@@ -27,13 +27,18 @@ export default function DateTimeStep({ selectedBarber, selectedService, onSelect
   useEffect(() => {
     const loadAppointments = async () => {
       const appointmentsData = await getAppointments();
-      setAppointments(appointmentsData);
+      setAppointments(appointmentsData || []);
     };
     loadAppointments();
   }, []);
 
-  // Horarios de trabajo con fallback seguro
-  const barberSchedule = selectedBarber?.schedule || DEFAULT_SCHEDULE;
+  // Fusionar schedule del barbero con el por defecto
+  const barberSchedule = useMemo(() => {
+    return {
+      ...DEFAULT_SCHEDULE,
+      ...(selectedBarber?.schedule || {})
+    };
+  }, [selectedBarber]);
 
   const slots = useMemo(
     () =>
@@ -60,11 +65,10 @@ export default function DateTimeStep({ selectedBarber, selectedService, onSelect
         Con <span className="font-semibold text-white">{selectedBarber?.name || 'el profesional'}</span>
       </p>
 
-      {/* Selector de día: carrusel horizontal con scroll táctil */}
+      {/* Selector de día */}
       <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 -mx-4 px-4">
         {days.map((day) => {
           const isSelected = day.iso === selectedDay.iso;
-          // Acceso seguro usando el schedule con fallback
           const attendsThisDay = Boolean(barberSchedule[day.dayOfWeek]);
 
           return (
@@ -73,7 +77,7 @@ export default function DateTimeStep({ selectedBarber, selectedService, onSelect
               onClick={() => setSelectedDay(day)}
               disabled={!attendsThisDay}
               className={`shrink-0 w-16 py-2.5 rounded-xl flex flex-col items-center gap-0.5 border transition-colors
-                ${isSelected ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'}
+                ${isSelected ? 'bg-amber-500 border-amber-500 text-slate-950 font-semibold' : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'}
                 ${!attendsThisDay ? 'opacity-30 pointer-events-none' : ''}
               `}
             >

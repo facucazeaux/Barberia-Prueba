@@ -2,179 +2,172 @@
  * Appointments Service
  * --------------------
  * Servicio para gestionar la lógica de negocio de turnos.
- * Conectado a localStorage para persistencia local inmediata entre Cliente y Admin.
- * Preparado para migrar a Supabase en el futuro.
+ * Conectado directamente a Supabase (PostgreSQL).
  */
 
-import { SERVICES, BARBERS } from '../data/mockData.js';
-
-const STORAGE_KEY = 'barberia_turnos_appointments';
+import { supabase } from '../lib/supabase.js';
 
 /**
- * Obtiene los turnos guardados en localStorage o inicializa los de prueba
+ * Mapea un registro de Supabase (snake_case) al formato del Frontend (camelCase)
  */
-function loadAppointments() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch (e) {
-      console.error('Error al leer turnos de localStorage:', e);
-    }
-  }
-
-  // Si no hay datos previos, cargamos los datos de prueba iniciales
-  const initial = getInitialMockAppointments();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-  return initial;
+function mapAppointmentFromDB(apt) {
+  if (!apt) return null;
+  return {
+    id: apt.id,
+    barberId: apt.barber_id,
+    serviceId: apt.service_id,
+    date: apt.date,
+    time: apt.time?.slice(0, 5) || apt.time, // Formato "HH:MM"
+    clientName: apt.client_name,
+    clientPhone: apt.client_phone,
+    clientEmail: apt.client_email,
+    status: apt.status,
+    createdAt: apt.created_at,
+  };
 }
 
 /**
- * Guarda el arreglo actualizado de turnos en localStorage
- */
-function saveAppointments(appointments) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(appointments));
-}
-
-/**
- * Genera datos de prueba iniciales
- */
-function getInitialMockAppointments() {
-  const todayISO = new Date().toISOString().slice(0, 10);
-  return [
-    {
-      id: 'apt-1',
-      barberId: 'juan',
-      serviceId: 'corte',
-      date: todayISO,
-      time: '10:00',
-      clientName: 'Lucas Fernández',
-      clientPhone: '+54 9 11 5555-1234',
-      clientEmail: 'lucas@email.com',
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'apt-2',
-      barberId: 'juan',
-      serviceId: 'combo',
-      date: todayISO,
-      time: '11:00',
-      clientName: 'Bruno Ledesma',
-      clientPhone: '+54 9 11 5555-5678',
-      clientEmail: 'bruno@email.com',
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'apt-3',
-      barberId: 'martin',
-      serviceId: 'color',
-      date: todayISO,
-      time: '14:00',
-      clientName: 'Carla Núñez',
-      clientPhone: '+54 9 11 5555-9012',
-      clientEmail: 'carla@email.com',
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    },
-  ];
-}
-
-/**
- * Obtiene todos los turnos
+ * Obtiene todos los turnos ordenados por fecha y hora
  */
 export async function getAppointments() {
-  return loadAppointments();
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('*')
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+
+  if (error) {
+    console.error('Error al obtener turnos de Supabase:', error);
+    return [];
+  }
+
+  return data.map(mapAppointmentFromDB);
 }
 
 /**
- * Obtiene turnos filtrados por criterios
+ * Obtiene turnos filtrados por criterios (barbero, fecha, estado)
  */
 export async function getAppointmentsByFilter(filters = {}) {
-  let filtered = loadAppointments();
-  
+  let query = supabase.from('appointments').select('*');
+
   if (filters.barberId) {
-    filtered = filtered.filter(apt => apt.barberId === filters.barberId);
+    query = query.eq('barber_id', filters.barberId);
   }
-  
+
   if (filters.date) {
-    filtered = filtered.filter(apt => apt.date === filters.date);
+    query = query.eq('date', filters.date);
   }
-  
+
   if (filters.status) {
-    filtered = filtered.filter(apt => apt.status === filters.status);
+    query = query.eq('status', filters.status);
   }
-  
-  return filtered;
+
+  const { data, error } = await query
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+
+  if (error) {
+    console.error('Error al filtrar turnos:', error);
+    return [];
+  }
+
+  return data.map(mapAppointmentFromDB);
 }
 
 /**
- * Crea un nuevo turno y lo guarda de forma permanente en el navegador
+ * Crea un nuevo turno en la base de datos de Supabase
  */
 export async function createAppointment(appointmentData) {
-  const currentAppointments = loadAppointments();
-  
-  const newAppointment = {
-    ...appointmentData,
-    id: `apt-${Date.now()}`,
+  const dbPayload = {
+    barber_id: appointmentData.barberId,
+    service_id: appointmentData.serviceId,
+    date: appointmentData.date,
+    time: appointmentData.time,
+    client_name: appointmentData.clientName,
+    client_phone: appointmentData.clientPhone,
+    client_email: appointmentData.clientEmail,
     status: 'confirmed',
-    createdAt: new Date().toISOString(),
   };
-  
-  const updated = [...currentAppointments, newAppointment];
-  saveAppointments(updated);
-  
-  return newAppointment;
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .insert([dbPayload])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error al crear el turno en Supabase:', error);
+    throw new Error('No se pudo guardar la reserva');
+  }
+
+  return mapAppointmentFromDB(data);
 }
 
 /**
- * Cancela un turno y actualiza la memoria
+ * Cancela un turno actualizando su estado en la base de datos
  */
 export async function cancelAppointment(appointmentId) {
-  const currentAppointments = loadAppointments();
-  
-  const updated = currentAppointments.map((apt) =>
-    apt.id === appointmentId ? { ...apt, status: 'cancelled' } : apt
-  );
-  
-  saveAppointments(updated);
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: 'cancelled' })
+    .eq('id', appointmentId);
+
+  if (error) {
+    console.error('Error al cancelar el turno en Supabase:', error);
+    return false;
+  }
+
   return true;
 }
 
 /**
- * Obtiene servicios disponibles
+ * Obtiene la lista de servicios desde Supabase
  */
-export function getServices() {
-  return SERVICES;
+export async function getServices() {
+  const { data, error } = await supabase.from('services').select('*');
+  if (error) {
+    console.error('Error al obtener servicios:', error);
+    return [];
+  }
+  return data;
 }
 
 /**
- * Obtiene barberos disponibles
+ * Obtiene la lista de barberos desde Supabase
  */
-export function getBarbers() {
-  return BARBERS;
+export async function getBarbers() {
+  const { data, error } = await supabase.from('barbers').select('*');
+  if (error) {
+    console.error('Error al obtener barberos:', error);
+    return [];
+  }
+  return data;
 }
 
 /**
- * Obtiene un barbero por ID
+ * Obtiene un barbero por ID desde Supabase
  */
-export function getBarberById(barberId) {
-  return BARBERS.find(b => b.id === barberId);
+export async function getBarberById(barberId) {
+  const { data, error } = await supabase
+    .from('barbers')
+    .select('*')
+    .eq('id', barberId)
+    .single();
+
+  if (error) return null;
+  return data;
 }
 
 /**
- * Obtiene un servicio por ID
+ * Obtiene un servicio por ID desde Supabase
  */
-export function getServiceById(serviceId) {
-  return SERVICES.find(s => s.id === serviceId);
-}
+export async function getServiceById(serviceId) {
+  const { data, error } = await supabase
+    .from('services')
+    .select('*')
+    .eq('id', serviceId)
+    .single();
 
-/**
- * Inicializa datos de ejemplo (reinicia localStorage)
- */
-export function initializeMockData() {
-  const initial = getInitialMockAppointments();
-  saveAppointments(initial);
-  return initial;
+  if (error) return null;
+  return data;
 }

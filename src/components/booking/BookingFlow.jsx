@@ -6,7 +6,7 @@ import BarberStep from './steps/BarberStep.jsx';
 import DateTimeStep from './steps/DateTimeStep.jsx';
 import ClientFormStep from './steps/ClientFormStep.jsx';
 import ConfirmationStep from './steps/ConfirmationStep.jsx';
-import { getServices, getBarbers, createAppointment, initializeMockData } from '../../services/appointmentsService.js';
+import { getServices, getBarbers, createAppointment } from '../../services/appointmentsService';
 import { sendBookingConfirmationEmail } from '../../services/emailService.js';
 import { syncAppointmentWithCalendars } from '../../services/googleCalendarService.js';
 
@@ -33,11 +33,15 @@ export default function BookingFlow() {
   const [services, setServices] = useState([]);
   const [barbers, setBarbers] = useState([]);
 
-  // Cargar datos iniciales
+// Cargar datos iniciales desde Supabase
   useEffect(() => {
-    initializeMockData();
-    setServices(getServices());
-    setBarbers(getBarbers());
+    async function fetchData() {
+      const servicesData = await getServices();
+      const barbersData = await getBarbers();
+      setServices(servicesData);
+      setBarbers(barbersData);
+    }
+    fetchData();
   }, []);
 
   const goTo = (nextStep) => {

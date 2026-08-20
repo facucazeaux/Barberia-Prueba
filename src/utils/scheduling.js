@@ -67,55 +67,37 @@ export function getAvailableSlots({
   dayOfWeek,
   serviceDuration = 30,
   appointments = [],
-  slotStep = 20,
+  slotStep = 30, // Intervalos de 30 minutos
 }) {
   if (!barber) return [];
 
-  // 1. Validar si la fecha está bloqueada
-  if (barber.blockedDates?.includes(dateIso)) return [];
+  // Horario por defecto: Lunes a Sábado de 09:00 a 20:00
+  const defaultSchedule = { start: '09:00', end: '20:00' };
+  
+  // Buscar schedule del barbero o usar el por defecto
+  const daySchedule = barber?.schedule?.[dayOfWeek] || (dayOfWeek !== 0 ? defaultSchedule : null);
 
-  // 2. Domingo cerrado por defecto (día 0)
-  if (dayOfWeek === 0 && !barber.schedule?.[0]) return [];
-
-  // 3. Obtener el rango horario del día (usar schedule del barbero o el default)
-  const daySchedule = barber.schedule?.[dayOfWeek] || DEFAULT_DAY_SCHEDULE;
   if (!daySchedule || !daySchedule.start || !daySchedule.end) return [];
 
-  // 4. Filtrar los turnos ocupados sanitizando la propiedad apt.time
-  const busyRanges = (appointments || [])
+  // Obtener turnos ocupados
+  const busyTimes = (appointments || [])
     .filter(
       (apt) =>
-        (apt.barberId === barber.id || apt.barber_id === barber.id) &&
+        (String(apt.barberId) === String(barber.id) || String(apt.barber_id) === String(barber.id)) &&
         apt.date === dateIso &&
         apt.status !== 'cancelled' &&
         Boolean(apt.time)
     )
-    .map((apt) => ({
-      start: String(apt.time).slice(0, 5),
-      end: addMinutes(String(apt.time).slice(0, 5), apt.durationMinutes || serviceDuration || 30),
-    }));
+    .map((apt) => String(apt.time).slice(0, 5));
 
-  const blockedSlots = barber.blockedSlots?.[dateIso] || [];
   const slots = [];
   let cursor = daySchedule.start;
 
-  const now = new Date();
-  const isToday = dateIso === toLocalISODate(now);
-  const nowHM = `${String(now.getHours()).padStart(2, '0')}:${String(
-    now.getMinutes()
-  ).padStart(2, '0')}`;
-
-  // 5. Generar slots paso a paso
+  // Generar lista de horarios paso a paso
   while (compareTime(addMinutes(cursor, serviceDuration), daySchedule.end) <= 0) {
-    const slotEnd = addMinutes(cursor, serviceDuration);
+    const isOccupied = busyTimes.includes(cursor);
 
-    const overlapsBusy = busyRanges.some(
-      (r) => compareTime(cursor, r.end) < 0 && compareTime(slotEnd, r.start) > 0
-    );
-    const isBlocked = blockedSlots.includes(cursor);
-    const isPast = isToday && compareTime(cursor, nowHM) <= 0;
-
-    if (!overlapsBusy && !isBlocked && !isPast) {
+    if (!isOccupied) {
       slots.push(cursor);
     }
     cursor = addMinutes(cursor, slotStep);

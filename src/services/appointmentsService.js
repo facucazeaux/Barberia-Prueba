@@ -171,3 +171,7 @@ export async function getServiceById(serviceId) {
   if (error) return null;
   return data;
 }
+
+export function initializeMockData() {
+  return;
+}

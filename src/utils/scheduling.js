@@ -1,21 +1,20 @@
 // =============================================================
-// UTILIDADES DE AGENDA
-// Calculan qué días y horarios están realmente disponibles para
-// reservar, cruzando el horario semanal del barbero con los
-// turnos ya confirmados y los bloqueos manuales.
+// UTILIDADES DE AGENDA (Compatibles con Supabase)
 // =============================================================
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Devuelve 'YYYY-MM-DD' en horario local (evita bugs de zona horaria de toISOString) */
+/** Horario general por defecto (Lunes a Sábado 09:00 a 20:00) */
+const DEFAULT_DAY_SCHEDULE = { start: '09:00', end: '20:00' };
+
+/** Devuelve 'YYYY-MM-DD' en horario local */
 export function toLocalISODate(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /**
- * Devuelve un array de los próximos `days` días como objetos
- * { iso, dayOfWeek, label, dayNumber } para pintar el selector de fecha.
+ * Devuelve un array de los próximos `days` días
  */
 export function getUpcomingDays(days = 14) {
   const weekdayLabels = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -42,69 +41,71 @@ export function getUpcomingDays(days = 14) {
   return result;
 }
 
-/** Suma minutos a un string 'HH:mm' y devuelve otro string 'HH:mm' */
-function addMinutes(time, minutes) {
+/** Suma minutos a un string 'HH:mm' de forma segura */
+function addMinutes(time = '00:00', minutes = 0) {
+  if (!time || typeof time !== 'string' || !time.includes(':')) {
+    return '00:00';
+  }
   const [h, m] = time.split(':').map(Number);
-  const total = h * 60 + m + minutes;
+  const total = (h || 0) * 60 + (m || 0) + minutes;
   const hh = Math.floor(total / 60) % 24;
   const mm = total % 60;
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
-/** Compara dos horas 'HH:mm' -> negativo si a < b, 0 si iguales, positivo si a > b */
-function compareTime(a, b) {
+/** Compara dos horas 'HH:mm' */
+function compareTime(a = '00:00', b = '00:00') {
   return a.localeCompare(b);
 }
 
 /**
- * Calcula los horarios disponibles para un barbero en una fecha dada,
- * en función de:
- *  - su horario de atención semanal (schedule)
- *  - la duración del servicio elegido
- *  - los turnos ya confirmados ese día (appointments)
- *  - fechas/horarios bloqueados manualmente
- *
- * @returns {string[]} lista de horarios 'HH:mm' disponibles
+ * Calcula los horarios disponibles para un barbero en una fecha dada.
  */
 export function getAvailableSlots({
   barber,
   dateIso,
   dayOfWeek,
-  serviceDuration,
-  appointments,
-  slotStep = 20, // cada cuántos minutos se ofrece un horario de inicio
+  serviceDuration = 30,
+  appointments = [],
+  slotStep = 20,
 }) {
-  // Día completo bloqueado por el barbero (vacaciones, feriado, etc)
+  if (!barber) return [];
+
+  // 1. Validar si la fecha está bloqueada
   if (barber.blockedDates?.includes(dateIso)) return [];
 
-  const daySchedule = barber.schedule[dayOfWeek];
-  if (!daySchedule) return []; // el barbero no atiende ese día de la semana
+  // 2. Domingo cerrado por defecto (día 0)
+  if (dayOfWeek === 0 && !barber.schedule?.[0]) return [];
 
-  const busyRanges = appointments
+  // 3. Obtener el rango horario del día (usar schedule del barbero o el default)
+  const daySchedule = barber.schedule?.[dayOfWeek] || DEFAULT_DAY_SCHEDULE;
+  if (!daySchedule || !daySchedule.start || !daySchedule.end) return [];
+
+  // 4. Filtrar los turnos ocupados sanitizando la propiedad apt.time
+  const busyRanges = (appointments || [])
     .filter(
       (apt) =>
-        apt.barberId === barber.id &&
+        (apt.barberId === barber.id || apt.barber_id === barber.id) &&
         apt.date === dateIso &&
-        apt.status === 'confirmed'
+        apt.status !== 'cancelled' &&
+        Boolean(apt.time)
     )
     .map((apt) => ({
-      start: apt.time,
-      end: addMinutes(apt.time, apt.durationMinutes || 30),
+      start: String(apt.time).slice(0, 5),
+      end: addMinutes(String(apt.time).slice(0, 5), apt.durationMinutes || serviceDuration || 30),
     }));
 
-  // Horarios puntuales bloqueados manualmente por el barbero (ej. "13:00 almuerzo")
   const blockedSlots = barber.blockedSlots?.[dateIso] || [];
-
   const slots = [];
   let cursor = daySchedule.start;
 
-  // Si es hoy, no ofrecer horarios que ya pasaron
   const now = new Date();
   const isToday = dateIso === toLocalISODate(now);
   const nowHM = `${String(now.getHours()).padStart(2, '0')}:${String(
     now.getMinutes()
   ).padStart(2, '0')}`;
 
+  // 5. Generar slots paso a paso
   while (compareTime(addMinutes(cursor, serviceDuration), daySchedule.end) <= 0) {
     const slotEnd = addMinutes(cursor, serviceDuration);
 

@@ -1,0 +1,32 @@
+# Dependencias
+node_modules/
+dist/
+build/
+*.log
+
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Vite
+.vite/
+
+# Testing
+coverage/
+
+# Misc
+*.pid
+*.seed
+*.pid.lock
